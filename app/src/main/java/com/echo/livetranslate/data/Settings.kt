@@ -97,6 +97,13 @@ data class Settings(
                 asrProvider.oneShotTranslate &&
                 transProvider == TransProvider.NONE
 
+    /** 影响翻译行为的字段集合，变了就得重建翻译管线 */
+    fun translationSignature(): List<Any> = listOf(
+        transProvider, targetLang,
+        openaiTransUrl, openaiTransKey, openaiTransModel,
+        deeplKey, deeplFreeTier, googleKey
+    )
+
     /** 配置不完整时的提示，null 表示可以启动 */
     fun validate(): String? = when {
         engineMode == EngineMode.AUDIO && asrProvider == AsrProvider.AZURE && azureKey.isBlank() ->

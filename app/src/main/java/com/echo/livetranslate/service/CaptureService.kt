@@ -48,9 +48,11 @@ class CaptureService : Service() {
     private var audio: AudioCapture? = null
     private var speech: SpeechProvider? = null
     private var ocr: ScreenTextReader? = null
-    private var pipeline: CaptionPipeline? = null
+    // 识别回调线程在读它，设置监听线程可能在换它
+    @Volatile private var pipeline: CaptionPipeline? = null
     private var overlay: OverlayController? = null
     private var sessionId = 0L
+    private var pipelineSignature: List<Any> = emptyList()
 
     @Volatile private var settings = Settings()
     @Volatile private var lastErrorShownAt = 0L
@@ -121,14 +123,7 @@ class CaptureService : Service() {
         val history = HistoryStore.get(this)
         sessionId = runCatching { history.beginSession(s.engineMode) }.getOrDefault(0L)
 
-        pipeline = CaptionPipeline(
-            scope = scope,
-            settings = s,
-            onState = { state -> overlay?.update(state) },
-            onFinalLine = { original, translated ->
-                scope.launch(Dispatchers.IO) { history.appendLine(sessionId, original, translated) }
-            }
-        )
+        buildPipeline(s)
 
         when (s.engineMode) {
             EngineMode.AUDIO -> startAudio(mp, s)
@@ -170,11 +165,33 @@ class CaptureService : Service() {
         ).also { it.start() }
     }
 
-    /** 设置改了就热更新悬浮窗样式；换识别服务这类结构性改动仍需重开。 */
+    private fun buildPipeline(s: Settings) {
+        val history = HistoryStore.get(this)
+        pipeline?.close()
+        pipeline = CaptionPipeline(
+            scope = scope,
+            settings = s,
+            onState = { state -> overlay?.update(state) },
+            onFinalLine = { original, translated ->
+                scope.launch(Dispatchers.IO) { history.appendLine(sessionId, original, translated) }
+            },
+            onError = { message -> reportError(message) }
+        )
+        pipelineSignature = s.translationSignature()
+    }
+
+    /**
+     * 设置改了就热更新：外观直接刷，翻译配置变了重建管线。
+     * 换识别服务商这类要重连的改动仍需停止后重开。
+     */
     private suspend fun observeSettings() {
         SettingsStore.flow(this).collect { s ->
             settings = s
             main.post { overlay?.apply(s) }
+            // 边看边配翻译是很自然的用法，不该逼用户重开一次服务
+            if (pipeline != null && s.translationSignature() != pipelineSignature) {
+                buildPipeline(s)
+            }
         }
     }
 

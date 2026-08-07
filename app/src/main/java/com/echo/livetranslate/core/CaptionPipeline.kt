@@ -29,7 +29,8 @@ class CaptionPipeline(
     private val scope: CoroutineScope,
     private val settings: Settings,
     private val onState: (CaptionState) -> Unit,
-    private val onFinalLine: (original: String, translated: String) -> Unit
+    private val onFinalLine: (original: String, translated: String) -> Unit,
+    private val onError: (String) -> Unit
 ) {
     private val translator: Translator? = Translator.from(settings)
 
@@ -103,6 +104,8 @@ class CaptionPipeline(
                 }.onFailure { e ->
                     if (e !is CancellationException) {
                         Log.w(TAG, "translate failed: ${e.message}")
+                        // 静默失败最难查：屏幕上只是没有中文，看不出为什么
+                        onError("翻译失败：${e.message}")
                         // 翻译挂了也别丢句子，原文照样存
                         if (caption.isFinal) {
                             record(original, "")
