@@ -3,6 +3,7 @@ package com.echo.livetranslate.provider.translate
 import com.echo.livetranslate.data.Settings
 import com.echo.livetranslate.net.Http
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.Request
@@ -20,6 +21,19 @@ class OpenAiCompatTranslator(private val s: Settings) : Translator {
 
     override suspend fun translate(text: String, targetLang: String): String =
         withContext(Dispatchers.IO) {
+            try {
+                request(text, targetLang)
+            } catch (e: RetryableException) {
+                // 限流和 5xx 多是瞬时的，等一下再来一次通常就过了。
+                // 只重一次：字幕的时效性撑不起更久的等待
+                delay(RETRY_DELAY_MS)
+                request(text, targetLang)
+            }
+        }
+
+    private class RetryableException(message: String) : Exception(message)
+
+    private fun request(text: String, targetLang: String): String {
             val messages = JSONArray()
                 .put(
                     JSONObject()
@@ -47,19 +61,23 @@ class OpenAiCompatTranslator(private val s: Settings) : Translator {
                 .post(payload.toString().toRequestBody(JSON))
                 .build()
 
-            Http.restClient.newCall(request).execute().use { resp ->
-                val body = resp.body?.string().orEmpty()
-                check(resp.isSuccessful) { "翻译接口 ${resp.code}: ${body.take(200)}" }
-                JSONObject(body)
-                    .getJSONArray("choices")
-                    .getJSONObject(0)
-                    .getJSONObject("message")
-                    .getString("content")
-                    .trim()
+        return Http.restClient.newCall(request).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            if (resp.code == 429 || resp.code >= 500) {
+                throw RetryableException("翻译接口 ${resp.code}: ${body.take(200)}")
             }
+            check(resp.isSuccessful) { "翻译接口 ${resp.code}: ${body.take(200)}" }
+            JSONObject(body)
+                .getJSONArray("choices")
+                .getJSONObject(0)
+                .getJSONObject("message")
+                .getString("content")
+                .trim()
         }
+    }
 
     private companion object {
         val JSON = "application/json; charset=utf-8".toMediaType()
+        const val RETRY_DELAY_MS = 350L
     }
 }

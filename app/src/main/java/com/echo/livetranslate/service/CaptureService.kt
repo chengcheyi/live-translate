@@ -175,7 +175,7 @@ class CaptureService : Service() {
             onFinalLine = { original, translated ->
                 scope.launch(Dispatchers.IO) { history.appendLine(sessionId, original, translated) }
             },
-            onError = { message -> reportError(message) }
+            onError = { message -> reportError(message, replacesCaption = false) }
         )
         pipelineSignature = s.translationSignature()
     }
@@ -195,13 +195,17 @@ class CaptureService : Service() {
         }
     }
 
-    private fun reportError(message: String) {
+    /**
+     * [replacesCaption] 区分两类错误：连接断了没字幕可显示，占用字幕位置是对的；
+     * 翻译只是这一句没拿到译文，原文还好好的，擦掉整条反而更糟。
+     */
+    private fun reportError(message: String, replacesCaption: Boolean = true) {
         Log.w(TAG, message)
         val now = System.currentTimeMillis()
         if (now - lastErrorShownAt < ERROR_THROTTLE_MS) return
         lastErrorShownAt = now
         main.post {
-            overlay?.showMessage(message)
+            if (replacesCaption) overlay?.showMessage(message)
             toast(message)
         }
     }
