@@ -16,6 +16,12 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
+
+        ndk {
+            // Azure SDK 每种架构一份原生库，四份加起来把包撑到 129MB。
+            // x86/x86_64 只有模拟器会用到，真机一律 arm。
+            abiFilters += setOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     buildTypes {
