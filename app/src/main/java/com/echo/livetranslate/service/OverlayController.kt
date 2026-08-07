@@ -160,13 +160,17 @@ class OverlayController(
 
     fun update(state: CaptionState) {
         root?.post {
+            originalView?.maxLines = settings.maxLines.coerceAtLeast(1)
             originalView?.text = state.original
             translatedView?.text = state.translated
         }
     }
 
+    /** 错误提示不受字幕行数限制——被截断的报错等于没报。 */
     fun showMessage(text: String) {
         root?.post {
+            originalView?.maxLines = MESSAGE_MAX_LINES
+            originalView?.visibility = View.VISIBLE
             originalView?.text = text
             translatedView?.text = ""
         }
@@ -205,4 +209,8 @@ class OverlayController(
 
     private fun dp(value: Int): Int =
         (value * context.resources.displayMetrics.density).roundToInt()
+
+    private companion object {
+        const val MESSAGE_MAX_LINES = 6
+    }
 }

@@ -19,19 +19,10 @@ class DeepgramProvider(private val s: Settings) : SpeechProvider {
 
     private var ws: WebSocket? = null
     @Volatile private var open = false
+    private lateinit var url: String
 
     override fun start(onCaption: (Caption) -> Unit, onError: (String) -> Unit) {
-        val base = s.deepgramUrl.trim().ifEmpty { "wss://api.deepgram.com/v1/listen" }
-        val url = buildString {
-            append(base)
-            append(if (base.contains('?')) "&" else "?")
-            append("encoding=linear16&sample_rate=").append(sampleRate)
-            append("&channels=1&interim_results=true&punctuate=true&smart_format=true")
-            append("&endpointing=300&vad_events=false")
-            append("&model=").append(s.deepgramModel.trim().ifEmpty { "nova-3" })
-            val lang = s.deepgramLanguage.trim()
-            if (lang.isNotEmpty()) append("&language=").append(lang)
-        }
+        url = buildUrl()
 
         val request = Request.Builder()
             .url(url)
@@ -60,7 +51,10 @@ class DeepgramProvider(private val s: Settings) : SpeechProvider {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 open = false
-                onError("Deepgram 连接失败：${response?.code ?: ""} ${t.message}")
+                // 握手失败时 OkHttp 已经把 body 关了，拿不到内容。
+                // 重发一次普通 GET，Deepgram 会用同样的 JSON 说明哪个参数不对。
+                val detail = explainFailure() ?: t.message.orEmpty()
+                onError("Deepgram 连接失败：$detail")
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
@@ -68,6 +62,42 @@ class DeepgramProvider(private val s: Settings) : SpeechProvider {
             }
         })
     }
+
+    private fun buildUrl(): String {
+        val base = s.deepgramUrl.trim().ifEmpty { "wss://api.deepgram.com/v1/listen" }
+        return buildString {
+            append(base)
+            append(if (base.contains('?')) "&" else "?")
+            append("encoding=linear16&sample_rate=").append(sampleRate)
+            append("&channels=1&interim_results=true&smart_format=true")
+            // 官方对多语种代码切换建议 100ms，顺带也让句子定稿更快
+            append("&endpointing=").append(if (s.deepgramLanguage.trim() == "multi") 100 else 300)
+            append("&model=").append(s.deepgramModel.trim().ifEmpty { "nova-3" })
+            val lang = s.deepgramLanguage.trim()
+            if (lang.isNotEmpty()) append("&language=").append(lang)
+        }
+    }
+
+    /** 把 Deepgram 的错误 JSON 转成人能看懂的一句话。 */
+    private fun explainFailure(): String? = runCatching {
+        val probe = Request.Builder()
+            .url(url.replaceFirst("wss://", "https://").replaceFirst("ws://", "http://"))
+            .addHeader("Authorization", "Token ${s.deepgramKey.trim()}")
+            .build()
+
+        Http.restClient.newCall(probe).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            val json = runCatching { JSONObject(body) }.getOrNull()
+            val message = json?.optString("err_msg").orEmpty()
+            val code = json?.optString("err_code").orEmpty()
+            when {
+                message.isNotEmpty() -> "${resp.code} $message" +
+                    if (code.isNotEmpty()) "（$code）" else ""
+                body.isNotEmpty() -> "${resp.code} ${body.take(180)}"
+                else -> "HTTP ${resp.code}"
+            }
+        }
+    }.getOrNull()
 
     override fun feed(pcm: ByteArray, len: Int) {
         if (!open) return
