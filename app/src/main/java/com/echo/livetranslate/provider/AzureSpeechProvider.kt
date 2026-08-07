@@ -4,11 +4,11 @@ import android.util.Log
 import com.echo.livetranslate.data.Settings
 import com.microsoft.cognitiveservices.speech.AutoDetectSourceLanguageConfig
 import com.microsoft.cognitiveservices.speech.PropertyId
-import com.microsoft.cognitiveservices.speech.SpeechTranslationConfig
 import com.microsoft.cognitiveservices.speech.audio.AudioConfig
 import com.microsoft.cognitiveservices.speech.audio.AudioInputStream
 import com.microsoft.cognitiveservices.speech.audio.AudioStreamFormat
 import com.microsoft.cognitiveservices.speech.audio.PushAudioInputStream
+import com.microsoft.cognitiveservices.speech.translation.SpeechTranslationConfig
 import com.microsoft.cognitiveservices.speech.translation.TranslationRecognizer
 
 /**
