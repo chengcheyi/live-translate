@@ -40,6 +40,7 @@ object SettingsStore {
         val openaiTransModel = stringPreferencesKey("openaiTransModel")
         val baiduAppId = stringPreferencesKey("baiduAppId")
         val baiduSecret = stringPreferencesKey("baiduSecret")
+        val baiduQps = intPreferencesKey("baiduQps")
         val deeplKey = stringPreferencesKey("deeplKey")
         val deeplFreeTier = booleanPreferencesKey("deeplFreeTier")
         val googleKey = stringPreferencesKey("googleKey")
@@ -86,6 +87,7 @@ object SettingsStore {
             p[K.openaiTransModel] = s.openaiTransModel
             p[K.baiduAppId] = s.baiduAppId
             p[K.baiduSecret] = s.baiduSecret
+            p[K.baiduQps] = s.baiduQps
             p[K.deeplKey] = s.deeplKey
             p[K.deeplFreeTier] = s.deeplFreeTier
             p[K.googleKey] = s.googleKey
@@ -131,6 +133,7 @@ object SettingsStore {
             openaiTransModel = this[K.openaiTransModel] ?: d.openaiTransModel,
             baiduAppId = this[K.baiduAppId] ?: d.baiduAppId,
             baiduSecret = this[K.baiduSecret] ?: d.baiduSecret,
+            baiduQps = this[K.baiduQps] ?: d.baiduQps,
             deeplKey = this[K.deeplKey] ?: d.deeplKey,
             deeplFreeTier = this[K.deeplFreeTier] ?: d.deeplFreeTier,
             googleKey = this[K.googleKey] ?: d.googleKey,

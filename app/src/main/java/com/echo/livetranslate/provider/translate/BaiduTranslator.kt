@@ -3,6 +3,9 @@ package com.echo.livetranslate.provider.translate
 import com.echo.livetranslate.data.Settings
 import com.echo.livetranslate.net.Http
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.Request
@@ -18,8 +21,19 @@ import java.security.MessageDigest
  */
 class BaiduTranslator(private val s: Settings) : Translator {
 
+    /** 留 15% 余量：卡着理论值发容易被判超限 */
+    override val minIntervalMs: Long
+        get() = (1150L / s.baiduQps.coerceIn(1, 100))
+
     override suspend fun translate(text: String, targetLang: String): String =
         withContext(Dispatchers.IO) {
+            // 排队：超过 QPS 会直接被拒，宁可等一下也别浪费一次调用
+            gate.withLock {
+                val wait = lastRequestAt + minIntervalMs - System.currentTimeMillis()
+                if (wait > 0) delay(wait)
+                lastRequestAt = System.currentTimeMillis()
+            }
+
             val appId = s.baiduAppId.trim()
             val secret = s.baiduSecret.trim()
             val salt = System.currentTimeMillis().toString()
@@ -45,7 +59,17 @@ class BaiduTranslator(private val s: Settings) : Translator {
                 val json = JSONObject(body)
                 // 百度用 HTTP 200 + error_code 表示失败，得单独判
                 json.optString("error_code").takeIf { it.isNotEmpty() && it != "52000" }?.let { code ->
-                    error("百度翻译 $code: ${json.optString("error_msg")}")
+                    val hint = when (code) {
+                        "54003" -> "请求太频繁（QPS 超限）。标准版每秒只能 1 次，" +
+                            "在设置里把 QPS 调成和你的百度账号一致，或实名认证升到高级版"
+                        "54004" -> "账户余额不足"
+                        "54005" -> "长文本请求过于频繁"
+                        "52001", "52002" -> "百度服务超时，稍后会自动重试"
+                        "58000" -> "客户端 IP 非法，检查百度控制台的 IP 白名单设置"
+                        "58002" -> "服务已停用，去百度控制台确认开通状态"
+                        else -> json.optString("error_msg")
+                    }
+                    error("百度翻译 $code: $hint")
                 }
 
                 val results = json.optJSONArray("trans_result")
@@ -74,5 +98,11 @@ class BaiduTranslator(private val s: Settings) : Translator {
     private fun md5(input: String): String {
         val digest = MessageDigest.getInstance("MD5").digest(input.toByteArray(Charsets.UTF_8))
         return BigInteger(1, digest).toString(16).padStart(32, '0')
+    }
+
+    private companion object {
+        // 限速是账号级的，管线重建换了实例也得接着算，所以放在伴生对象里
+        val gate = Mutex()
+        @Volatile var lastRequestAt = 0L
     }
 }

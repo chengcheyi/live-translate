@@ -65,6 +65,8 @@ data class Settings(
 
     val baiduAppId: String = "",
     val baiduSecret: String = "",
+    /** 标准版 1，个人实名后的高级版 10。填错会一直撞 54003 */
+    val baiduQps: Int = 1,
 
     val deeplKey: String = "",
     val deeplFreeTier: Boolean = true,
@@ -105,7 +107,7 @@ data class Settings(
     fun translationSignature(): List<Any> = listOf(
         transProvider, targetLang,
         openaiTransUrl, openaiTransKey, openaiTransModel,
-        baiduAppId, baiduSecret,
+        baiduAppId, baiduSecret, baiduQps,
         deeplKey, deeplFreeTier, googleKey
     )
 

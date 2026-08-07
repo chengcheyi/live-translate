@@ -34,6 +34,17 @@ class CaptionPipeline(
 ) {
     private val translator: Translator? = Translator.from(settings)
 
+    /** 中间结果的节流间隔，不能比服务商的限速还密 */
+    private val partialInterval: Long =
+        maxOf(PARTIAL_INTERVAL_MS, translator?.minIntervalMs ?: 0L)
+
+    /**
+     * 限速太严时干脆放弃翻译中间结果。
+     * 配额都花在半句话上，真正该翻的定稿反而要排队，得不偿失。
+     */
+    private val translatePartials: Boolean =
+        (translator?.minIntervalMs ?: 0L) <= PARTIAL_BUDGET_MS
+
     /** 当前是第几句。晚到的译文靠它判断自己是否已经过期 */
     @Volatile private var utterance = 0L
     @Volatile private var awaitingNextUtterance = false
@@ -94,9 +105,10 @@ class CaptionPipeline(
                 return
             }
         } else {
+            if (!translatePartials) return
             if (text == lastTranslatedSource) return
             val now = System.currentTimeMillis()
-            if (now - lastPartialSentAt < PARTIAL_INTERVAL_MS) return
+            if (now - lastPartialSentAt < partialInterval) return
             if (text.length < MIN_PARTIAL_CHARS) return
             lastPartialSentAt = now
         }
@@ -149,6 +161,8 @@ class CaptionPipeline(
         const val TAG = "CaptionPipeline"
         /** 中间结果最多这么频繁地送去翻译 */
         const val PARTIAL_INTERVAL_MS = 400L
+        /** 服务商限速比这还慢，就只翻定稿 */
+        const val PARTIAL_BUDGET_MS = 600L
         const val MIN_PARTIAL_CHARS = 6
     }
 }

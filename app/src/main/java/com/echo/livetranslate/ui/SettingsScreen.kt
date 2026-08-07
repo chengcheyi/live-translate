@@ -202,6 +202,16 @@ private fun TranslateSection(s: Settings, onChange: (Settings) -> Unit) {
                     onChange(s.copy(baiduAppId = it))
                 }
                 Field("密钥", s.baiduSecret, secret = true) { onChange(s.copy(baiduSecret = it)) }
+                SliderRow("QPS 上限", s.baiduQps, 1..10, " 次/秒") {
+                    onChange(s.copy(baiduQps = it))
+                }
+                Text(
+                    "标准版填 1，个人实名认证后的高级版填 10。\n" +
+                        "填得比账号实际额度高会一直报 54003；填 1 时只翻译定稿的整句，" +
+                        "中文会在一句话说完后才出现。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             TransProvider.OPENAI_COMPAT -> {
