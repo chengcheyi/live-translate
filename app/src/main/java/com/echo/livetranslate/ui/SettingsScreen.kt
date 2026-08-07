@@ -206,9 +206,11 @@ private fun TranslateSection(s: Settings, onChange: (Settings) -> Unit) {
                     onChange(s.copy(baiduQps = it))
                 }
                 Text(
-                    "标准版填 1，个人实名认证后的高级版填 10。\n" +
-                        "填得比账号实际额度高会一直报 54003；填 1 时只翻译定稿的整句，" +
-                        "中文会在一句话说完后才出现。",
+                    "标准版 1，高级版 10。填高了也不会一直报错——撞到限速会自动降速，" +
+                        "稳定后再慢慢收回来。\n" +
+                        "注意：实名认证只是拿到资格，还要去百度控制台把服务版本手动切到高级版，" +
+                        "QPS 才真的变成 10。\n" +
+                        "填 1 时只翻译整句，中文会在一句话说完后才出现。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
