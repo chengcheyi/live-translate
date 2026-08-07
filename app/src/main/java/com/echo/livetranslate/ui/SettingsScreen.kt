@@ -141,9 +141,12 @@ private fun AudioSection(s: Settings, onChange: (Settings) -> Unit) {
                 Field("模型", s.deepgramModel, hint = "nova-3 最准，nova-2 更便宜") {
                     onChange(s.copy(deepgramModel = it))
                 }
-                Field("语言", s.deepgramLanguage, hint = "multi = 多语种自动识别；也可填 en、ja、ko") {
-                    onChange(s.copy(deepgramLanguage = it))
-                }
+                Field(
+                    "语言", s.deepgramLanguage,
+                    hint = "只能填一个代码，不要用逗号列多个。\n" +
+                        "固定一种语言最准最快，例如 en / ja / ko；\n" +
+                        "内容会在多种语言间切换时才填 multi"
+                ) { onChange(s.copy(deepgramLanguage = it)) }
             }
 
             AsrProvider.OPENAI_REALTIME -> {

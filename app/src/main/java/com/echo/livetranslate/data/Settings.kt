@@ -103,6 +103,10 @@ data class Settings(
             "请填写 Azure 语音服务的 Key 和区域"
         engineMode == EngineMode.AUDIO && asrProvider == AsrProvider.DEEPGRAM && deepgramKey.isBlank() ->
             "请填写 Deepgram 的 API Key"
+        // Azure 那栏能列多个语言，Deepgram 不能。两栏长得一样，很容易照抄错
+        engineMode == EngineMode.AUDIO && asrProvider == AsrProvider.DEEPGRAM &&
+            deepgramLanguage.contains(',') ->
+            "Deepgram 的语言只能填一个代码（如 en）。要同时识别多种语言请填 multi"
         engineMode == EngineMode.AUDIO && asrProvider == AsrProvider.OPENAI_REALTIME && realtimeKey.isBlank() ->
             "请填写 Realtime 接口的 API Key"
         !translationComesFromAsr && transProvider == TransProvider.NONE ->
