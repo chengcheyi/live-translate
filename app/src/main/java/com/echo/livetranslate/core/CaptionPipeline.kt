@@ -7,10 +7,7 @@ import com.echo.livetranslate.provider.translate.Translator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 data class CaptionState(
     val original: String = "",
@@ -21,9 +18,12 @@ data class CaptionState(
 /**
  * 把识别结果变成屏幕上的一行字幕，顺带把定稿的句子交给历史记录。
  *
- * 延迟策略：原文一到就立刻上屏，不等翻译；译文异步补位。
- * 中间结果（partial）会被节流并且只保留最新一条在飞——否则翻译请求会
- * 排成一条越拖越长的队，字幕反而比声音慢好几秒。
+ * 核心是「句」的概念：识别端对同一句话会连续吐出越来越长的中间结果，
+ * 最后给一条定稿。译文按句归属——只要还在同一句里，晚到的译文依然有效
+ * 并且照常上屏；一旦进入下一句，前一句的译文立刻作废。
+ *
+ * 早先的实现要求「译文回来时原文必须和送出去时完全一致」，而原文每隔
+ * 几百毫秒就在变长，于是翻译越慢丢得越多，慢到一定程度就完全不出中文了。
  */
 class CaptionPipeline(
     private val scope: CoroutineScope,
@@ -34,113 +34,121 @@ class CaptionPipeline(
 ) {
     private val translator: Translator? = Translator.from(settings)
 
-    @Volatile private var current = CaptionState()
+    /** 当前是第几句。晚到的译文靠它判断自己是否已经过期 */
+    @Volatile private var utterance = 0L
+    @Volatile private var awaitingNextUtterance = false
+
+    @Volatile private var original = ""
+    @Volatile private var translated = ""
+
     @Volatile private var lastTranslatedSource = ""
     @Volatile private var lastPartialSentAt = 0L
     @Volatile private var lastRecorded = ""
 
-    /** 已定稿但译文还在路上的句子，等译文回来再入库 */
-    @Volatile private var pendingFinal: String? = null
-
-    private val gate = Mutex()
     private var inFlight: Job? = null
 
     fun submit(caption: Caption) {
-        val original = caption.original.trim()
-        if (original.isEmpty()) return
+        val text = caption.original.trim()
+        if (text.isEmpty()) return
+
+        // 上一句已经定稿，这条属于新的一句：先把译文清空。
+        // 否则旧译文会挂在新原文下面，看起来像翻译错了
+        if (awaitingNextUtterance) {
+            awaitingNextUtterance = false
+            utterance++
+            translated = ""
+            lastTranslatedSource = ""
+            lastPartialSentAt = 0L
+        }
+        val mine = utterance
+
+        original = text
 
         // 识别端自带译文时直接用，一次网络往返都不用多花
-        if (caption.translated != null) {
-            push(CaptionState(original, caption.translated, caption.isFinal))
-            if (caption.isFinal) record(original, caption.translated)
+        caption.translated?.let { ready ->
+            translated = ready
+            emit(caption.isFinal)
+            if (caption.isFinal) {
+                record(text, ready)
+                awaitingNextUtterance = true
+            }
             return
         }
 
-        push(current.copy(original = original, isFinal = caption.isFinal))
+        emit(caption.isFinal)
 
         val t = translator
         if (t == null) {
-            if (caption.isFinal) record(original, "")
+            if (caption.isFinal) {
+                record(text, "")
+                awaitingNextUtterance = true
+            }
             return
         }
 
         if (caption.isFinal) {
-            pendingFinal = original
-            // 上一版的译文正好就是这句，直接入库不用再请求一次
-            if (original == lastTranslatedSource && current.translated.isNotEmpty()) {
-                record(original, current.translated)
-                pendingFinal = null
+            // 这一句的译文已经拿到过且原文没再变，不用再请求一次
+            if (text == lastTranslatedSource && translated.isNotEmpty()) {
+                record(text, translated)
+                awaitingNextUtterance = true
                 return
             }
         } else {
-            if (original == lastTranslatedSource) return
+            if (text == lastTranslatedSource) return
             val now = System.currentTimeMillis()
             if (now - lastPartialSentAt < PARTIAL_INTERVAL_MS) return
-            if (original.length < MIN_PARTIAL_CHARS) return
+            if (text.length < MIN_PARTIAL_CHARS) return
             lastPartialSentAt = now
         }
 
-        // 后来者胜：新的一版一到就放弃上一版，永远只显示最新
+        // 后来者胜：同一句里只保留最新一版在飞，避免请求排队越拖越长
         inFlight?.cancel()
         inFlight = scope.launch {
-            if (!caption.isFinal) delay(PARTIAL_SETTLE_MS)
-            val result = runCatching { t.translate(original, settings.targetLang) }
-            gate.withLock {
-                result.onSuccess { translated ->
-                    if (current.original == original || caption.isFinal) {
-                        lastTranslatedSource = original
-                        push(
-                            current.copy(
-                                original = original,
-                                translated = translated,
-                                isFinal = caption.isFinal
-                            )
-                        )
-                    }
-                    if (caption.isFinal) {
-                        record(original, translated)
-                        pendingFinal = null
-                    }
-                }.onFailure { e ->
-                    if (e !is CancellationException) {
-                        Log.w(TAG, "translate failed: ${e.message}")
-                        // 静默失败最难查：屏幕上只是没有中文，看不出为什么
-                        onError("翻译失败：${e.message}")
-                        // 翻译挂了也别丢句子，原文照样存
-                        if (caption.isFinal) {
-                            record(original, "")
-                            pendingFinal = null
-                        }
-                    }
+            val result = runCatching { t.translate(text, settings.targetLang) }
+            result.onSuccess { done ->
+                // 只要还在同一句里就照常上屏。译文可能比原文少几个词，
+                // 但那是同一句话，读起来是连贯的——总好过什么都不显示
+                if (mine == utterance) {
+                    lastTranslatedSource = text
+                    translated = done
+                    emit(caption.isFinal)
+                }
+                if (caption.isFinal) {
+                    record(text, done)
+                    awaitingNextUtterance = true
+                }
+            }.onFailure { e ->
+                if (e is CancellationException) return@onFailure
+                Log.w(TAG, "translate failed: ${e.message}")
+                // 静默失败最难查：屏幕上只是没有中文，看不出为什么
+                onError("翻译失败：${e.message}")
+                if (caption.isFinal) {
+                    // 翻译挂了也别丢句子，原文照样存
+                    record(text, "")
+                    awaitingNextUtterance = true
                 }
             }
         }
     }
 
-    private fun record(original: String, translated: String) {
-        if (original == lastRecorded) return
-        lastRecorded = original
-        onFinalLine(original, translated)
+    private fun emit(isFinal: Boolean) {
+        onState(CaptionState(original, translated, isFinal))
     }
 
-    private fun push(state: CaptionState) {
-        current = state
-        onState(state)
+    private fun record(text: String, translation: String) {
+        if (text == lastRecorded) return
+        lastRecorded = text
+        onFinalLine(text, translation)
     }
 
     fun close() {
         inFlight?.cancel()
-        // 还没等到译文的最后一句，落一条原文，别让它凭空消失
-        pendingFinal?.let { record(it, "") }
-        pendingFinal = null
     }
 
     private companion object {
         const val TAG = "CaptionPipeline"
         /** 中间结果最多这么频繁地送去翻译 */
-        const val PARTIAL_INTERVAL_MS = 450L
-        /** 再等一下下，避开正在快速变化的半个词 */
-        const val PARTIAL_SETTLE_MS = 120L
+        const val PARTIAL_INTERVAL_MS = 400L
         const val MIN_PARTIAL_CHARS = 6
     }
 }

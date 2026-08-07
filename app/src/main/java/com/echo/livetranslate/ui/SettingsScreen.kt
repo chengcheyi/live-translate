@@ -197,6 +197,13 @@ private fun TranslateSection(s: Settings, onChange: (Settings) -> Unit) {
         when (s.transProvider) {
             TransProvider.NONE -> Unit
 
+            TransProvider.BAIDU -> {
+                Field("APP ID", s.baiduAppId, hint = "fanyi-api.baidu.com 控制台，个人实名即可") {
+                    onChange(s.copy(baiduAppId = it))
+                }
+                Field("密钥", s.baiduSecret, secret = true) { onChange(s.copy(baiduSecret = it)) }
+            }
+
             TransProvider.OPENAI_COMPAT -> {
                 Field(
                     "接口地址", s.openaiTransUrl,
@@ -206,9 +213,11 @@ private fun TranslateSection(s: Settings, onChange: (Settings) -> Unit) {
                 Field("API Key", s.openaiTransKey, secret = true) {
                     onChange(s.copy(openaiTransKey = it))
                 }
-                Field("模型", s.openaiTransModel, hint = "字幕场景选小模型：越小越快，翻译短句差别不大") {
-                    onChange(s.copy(openaiTransModel = it))
-                }
+                Field(
+                    "模型", s.openaiTransModel,
+                    hint = "大模型首字延迟 1-3 秒，字幕会明显滞后。\n" +
+                        "追求低延迟请改用上面的百度翻译"
+                ) { onChange(s.copy(openaiTransModel = it)) }
             }
 
             TransProvider.DEEPL -> {

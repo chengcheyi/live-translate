@@ -10,6 +10,7 @@ interface Translator {
     companion object {
         fun from(s: Settings): Translator? = when (s.transProvider) {
             TransProvider.NONE -> null
+            TransProvider.BAIDU -> BaiduTranslator(s)
             TransProvider.OPENAI_COMPAT -> OpenAiCompatTranslator(s)
             TransProvider.DEEPL -> DeepLTranslator(s)
             TransProvider.GOOGLE -> GoogleTranslator(s)

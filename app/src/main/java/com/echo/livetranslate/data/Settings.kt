@@ -27,7 +27,8 @@ enum class OcrScript(val label: String) {
 
 enum class TransProvider(val label: String) {
     NONE("不额外翻译（由识别端直出）"),
-    OPENAI_COMPAT("OpenAI 兼容接口（DeepSeek / Kimi / OpenRouter / 本地均可）"),
+    BAIDU("百度翻译（最快，国内直连，推荐）"),
+    OPENAI_COMPAT("大模型 / OpenAI 兼容接口（较慢）"),
     DEEPL("DeepL"),
     GOOGLE("Google Translate v2")
 }
@@ -61,6 +62,9 @@ data class Settings(
     val openaiTransUrl: String = "https://api.openai.com/v1/chat/completions",
     val openaiTransKey: String = "",
     val openaiTransModel: String = "gpt-4o-mini",
+
+    val baiduAppId: String = "",
+    val baiduSecret: String = "",
 
     val deeplKey: String = "",
     val deeplFreeTier: Boolean = true,
@@ -101,6 +105,7 @@ data class Settings(
     fun translationSignature(): List<Any> = listOf(
         transProvider, targetLang,
         openaiTransUrl, openaiTransKey, openaiTransModel,
+        baiduAppId, baiduSecret,
         deeplKey, deeplFreeTier, googleKey
     )
 
@@ -120,6 +125,8 @@ data class Settings(
             "当前识别服务不自带翻译，请在「翻译」里选一个服务商"
         transProvider == TransProvider.OPENAI_COMPAT && openaiTransKey.isBlank() ->
             "请填写翻译用的 API Key"
+        transProvider == TransProvider.BAIDU && (baiduAppId.isBlank() || baiduSecret.isBlank()) ->
+            "请填写百度翻译的 APP ID 和密钥"
         transProvider == TransProvider.DEEPL && deeplKey.isBlank() -> "请填写 DeepL 的 Key"
         transProvider == TransProvider.GOOGLE && googleKey.isBlank() -> "请填写 Google 翻译的 Key"
         else -> null
